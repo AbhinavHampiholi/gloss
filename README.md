@@ -32,9 +32,9 @@ cd gloss && make install
 git gloss init
 ```
 
-Configures `notes.rewriteRef` (so notes survive rebase) and adds fetch/push
-refspecs on every remote (so notes travel with `git push`/`git fetch`).
-Idempotent.
+Configures `notes.rewriteRef` so notes follow commits through rebase.
+Leaves your remotes' fetch/push refspecs alone; use `git gloss fetch` and
+`git gloss push` to move notes between repos. Idempotent.
 
 ## Commands
 
@@ -46,6 +46,8 @@ Idempotent.
 | `git gloss commit -m <msg>`          | Commit with no note (equivalent to `git commit`).         |
 | `git gloss show <sha>`               | `git show` with the note inline.                          |
 | `git gloss note <sha>`               | Print the raw note. Exit 1 (silent) if there isn't one.   |
+| `git gloss fetch [remote]`           | Fetch gloss notes from remote (default `origin`).         |
+| `git gloss push  [remote]`           | Push local gloss notes to remote (default `origin`).      |
 
 Every other `git commit` flag (`-a`, `--amend`, `--author`, `-F`, `-S`, …)
 passes straight through.

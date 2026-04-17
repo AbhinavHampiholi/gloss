@@ -19,6 +19,8 @@ Usage:
   git gloss commit -m <msg> [-C <file|->]    Commit, optionally with context
   git gloss show <commit>                    Show a commit with its context
   git gloss note <commit>                    Print a commit's raw context
+  git gloss fetch [remote]                   Fetch gloss notes from remote
+  git gloss push  [remote]                   Push local gloss notes to remote
 
 Commit flags:
   -C, --context <file>   Read context from file. Use "-" for stdin.
@@ -43,6 +45,10 @@ func main() {
 		os.Exit(cmdShow(rest))
 	case "note":
 		os.Exit(cmdNote(rest))
+	case "fetch":
+		os.Exit(cmdFetch(rest))
+	case "push":
+		os.Exit(cmdPush(rest))
 	case "-h", "--help", "help":
 		fmt.Print(usage)
 		os.Exit(0)
