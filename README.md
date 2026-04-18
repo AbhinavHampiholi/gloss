@@ -33,7 +33,7 @@ refspecs added by earlier versions.
 |-------------------------------------|-------------------------------------------------------------|
 | `git gloss init`                        | Configure the current repository.                       |
 | `git gloss commit -m MSG [-C SRC]`      | `git commit`, then attach `SRC` as a note. Skipped if `SRC` is empty. |
-| `git gloss list [-n N] [--glossed] [--all]` | Recent commits, prefixed `●` if glossed else `·`. `--all`: every commit in the repo that has a note, regardless of reachability. |
+| `git gloss list [-n N] [--glossed] [--all] [--no-fallback]` | Recent commits, prefixed `●` if glossed else `·`. `--all`: every commit in the repo that has a note, regardless of reachability. `--no-fallback`: direct notes only (fast). |
 | `git gloss show REV`                    | `git show REV` with the note rendered inline.           |
 | `git gloss note REV [--no-fallback]`    | Print the raw note body. Exit 1 if none exists.         |
 | `git gloss copy [-f] FROM TO`           | Copy a note from one commit to another.                 |
@@ -56,15 +56,17 @@ unaffected.
 
 When a commit is squash-merged into another branch, the new commit has a
 different SHA and no note. If the commit subject ends with `(#N)` (the
-convention GitHub uses for squashed PRs), `note` and `show` fall back to:
+convention GitHub uses for squashed PRs), `note`, `show`, and `list` fall
+back to:
 
 1. `gh pr view N --json headRefOid` to obtain the original head SHA.
 2. A second note lookup on that SHA.
 
 Requires `gh` on `PATH`, authenticated for the PR's repository. Silent
 no-op otherwise. `note` reports the resolved source on stderr; stdout
-remains the raw note bytes for pipe consumers. Pass `--no-fallback` to
-`note` to disable.
+remains the raw note bytes for pipe consumers. `list` resolves markers
+in parallel (cap 10 concurrent gh calls). Pass `--no-fallback` to
+`note` or `list` to disable.
 
 `copy` is a manual escape hatch for cases where automatic resolution
 isn't possible (e.g. unusual merge strategy, private PR, or the source
