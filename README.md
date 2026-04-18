@@ -50,6 +50,28 @@ under the ref `refs/notes/gloss`. No schema. Transport is explicit via
 `git gloss fetch` / `git gloss push`; `git push` / `git pull` are
 unaffected.
 
+## Transport
+
+`git push` does not move notes. Notes live on `refs/notes/gloss` and
+must be pushed explicitly:
+
+```
+git push              # commits + branches, as usual
+git gloss push        # notes
+```
+
+Similarly, `git fetch` / `git pull` do not retrieve notes:
+
+```
+git gloss fetch       # pulls down notes from origin
+```
+
+To push both in one step, alias as you see fit:
+
+```
+alias gpush='git push && git gloss push'
+```
+
 ## Example: manual use with Claude Code
 
 Capture the current session as the note (macOS; substitute `xclip -o`
@@ -58,11 +80,13 @@ or `wl-paste` on Linux):
 ```
 /export                                      # in Claude Code → clipboard
 pbpaste | git gloss commit -m MSG -C -       # in shell
+git gloss push                               # share with collaborators
 ```
 
 Resume from a prior commit in a fresh session:
 
 ```
+git gloss fetch                              # if resuming from someone else's commit
 git gloss note SHA | claude
 ```
 
