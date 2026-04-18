@@ -33,6 +33,7 @@ refspecs added by earlier versions.
 |-------------------------------------|-------------------------------------------------------------|
 | `git gloss init`                    | Configure the current repository.                           |
 | `git gloss commit -m MSG [-C SRC]`  | `git commit`, then attach `SRC` as a note. Skipped if `SRC` is empty. |
+| `git gloss list [-n N] [--glossed]` | Recent commits, prefixed `●` if glossed else `·`. Default `N`=20. |
 | `git gloss show REV`                | `git show REV --show-notes=refs/notes/gloss`.               |
 | `git gloss note REV`                | Print the raw note body. Exit 1 if none exists.             |
 | `git gloss fetch [REMOTE]`          | `git fetch REMOTE +refs/notes/gloss:refs/notes/gloss`. No-op on missing remote ref. |

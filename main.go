@@ -17,8 +17,9 @@ const usage = `git-gloss: attach verbose context to git commits
 Usage:
   git gloss init                             Configure this repo for gloss
   git gloss commit -m <msg> [-C <file|->]    Commit, optionally with context
-  git gloss show <commit>                    Show a commit with its context
-  git gloss note <commit>                    Print a commit's raw context
+  git gloss list  [-n N] [--glossed] [range] Recent commits, marked with ● if glossed
+  git gloss show  <commit>                   Show a commit with its context
+  git gloss note  <commit>                   Print a commit's raw context
   git gloss fetch [remote]                   Fetch gloss notes from remote
   git gloss push  [remote]                   Push local gloss notes to remote
 
@@ -45,6 +46,8 @@ func main() {
 		os.Exit(cmdShow(rest))
 	case "note":
 		os.Exit(cmdNote(rest))
+	case "list", "ls":
+		os.Exit(cmdList(rest))
 	case "fetch":
 		os.Exit(cmdFetch(rest))
 	case "push":
