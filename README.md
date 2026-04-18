@@ -50,6 +50,24 @@ under the ref `refs/notes/gloss`. No schema. Transport is explicit via
 `git gloss fetch` / `git gloss push`; `git push` / `git pull` are
 unaffected.
 
+## Example: manual use with Claude Code
+
+Capture the current session as the note (macOS; substitute `xclip -o`
+or `wl-paste` on Linux):
+
+```
+/export                                      # in Claude Code → clipboard
+pbpaste | git gloss commit -m MSG -C -       # in shell
+```
+
+Resume from a prior commit in a fresh session:
+
+```
+git gloss note SHA | claude
+```
+
+No additional tooling required.
+
 ## License
 
 MIT.
