@@ -31,13 +31,14 @@ refspecs added by earlier versions.
 
 | Command                             | Description                                                 |
 |-------------------------------------|-------------------------------------------------------------|
-| `git gloss init`                    | Configure the current repository.                           |
-| `git gloss commit -m MSG [-C SRC]`  | `git commit`, then attach `SRC` as a note. Skipped if `SRC` is empty. |
-| `git gloss list [-n N] [--glossed]` | Recent commits, prefixed `●` if glossed else `·`. Default `N`=20. |
-| `git gloss show REV`                | `git show REV --show-notes=refs/notes/gloss`.               |
-| `git gloss note REV`                | Print the raw note body. Exit 1 if none exists.             |
-| `git gloss fetch [REMOTE]`          | `git fetch REMOTE +refs/notes/gloss:refs/notes/gloss`. No-op on missing remote ref. |
-| `git gloss push  [REMOTE]`          | `git push REMOTE refs/notes/gloss:refs/notes/gloss`. No-op if local ref is absent. |
+| `git gloss init`                        | Configure the current repository.                       |
+| `git gloss commit -m MSG [-C SRC]`      | `git commit`, then attach `SRC` as a note. Skipped if `SRC` is empty. |
+| `git gloss list [-n N] [--glossed] [--all]` | Recent commits, prefixed `●` if glossed else `·`. `--all`: every commit in the repo that has a note, regardless of reachability. |
+| `git gloss show REV`                    | `git show REV` with the note rendered inline.           |
+| `git gloss note REV [--no-fallback]`    | Print the raw note body. Exit 1 if none exists.         |
+| `git gloss copy [-f] FROM TO`           | Copy a note from one commit to another.                 |
+| `git gloss fetch [REMOTE]`              | `git fetch REMOTE +refs/notes/gloss:refs/notes/gloss`. No-op on missing remote ref. |
+| `git gloss push  [REMOTE]`              | `git push REMOTE refs/notes/gloss:refs/notes/gloss`. No-op if local ref is absent. |
 
 Defaults: `REV` = `HEAD`, `REMOTE` = `origin`.
 
@@ -50,6 +51,24 @@ Notes are plain-text blobs in the git object store, keyed by commit SHA,
 under the ref `refs/notes/gloss`. No schema. Transport is explicit via
 `git gloss fetch` / `git gloss push`; `git push` / `git pull` are
 unaffected.
+
+## Squash-merge fallback
+
+When a commit is squash-merged into another branch, the new commit has a
+different SHA and no note. If the commit subject ends with `(#N)` (the
+convention GitHub uses for squashed PRs), `note` and `show` fall back to:
+
+1. `gh pr view N --json headRefOid` to obtain the original head SHA.
+2. A second note lookup on that SHA.
+
+Requires `gh` on `PATH`, authenticated for the PR's repository. Silent
+no-op otherwise. `note` reports the resolved source on stderr; stdout
+remains the raw note bytes for pipe consumers. Pass `--no-fallback` to
+`note` to disable.
+
+`copy` is a manual escape hatch for cases where automatic resolution
+isn't possible (e.g. unusual merge strategy, private PR, or the source
+SHA is known by some other means).
 
 ## Transport
 

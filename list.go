@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"sort"
 	"strconv"
 	"strings"
 )
@@ -19,11 +20,18 @@ import (
 //
 //	-n N          limit to the N most recent commits (default 20)
 //	--glossed     only show commits that have a note
+//	--all         list every commit in the repo with a note, regardless
+//	              of reachability from HEAD. Sorted by commit time desc.
 //	<revrange>    any argument that doesn't start with '-' is passed to
-//	              git log verbatim (e.g. 'main..HEAD', 'HEAD~50..')
+//	              git log verbatim (e.g. 'main..HEAD', 'HEAD~50..', 'branch')
+//
+// Note: list checks for *direct* notes only — it does not run the PR-number
+// fallback that `note` / `show` / `resume` do. To see everything that's
+// been glossed anywhere in the repo, use `--all`.
 func cmdList(args []string) int {
 	n := 20
 	glossedOnly := false
+	listAll := false
 	var revrange []string
 
 	for i := 0; i < len(args); i++ {
@@ -50,8 +58,10 @@ func cmdList(args []string) int {
 			n = v
 		case a == "--glossed":
 			glossedOnly = true
+		case a == "--all":
+			listAll = true
 		case a == "-h" || a == "--help":
-			fmt.Println("Usage: git gloss list [-n N] [--glossed] [<revrange>]")
+			fmt.Println("Usage: git gloss list [-n N] [--glossed] [--all] [<revrange>]")
 			return 0
 		case strings.HasPrefix(a, "-"):
 			fmt.Fprintf(os.Stderr, "git-gloss list: unknown flag %q\n", a)
@@ -61,17 +71,22 @@ func cmdList(args []string) int {
 		}
 	}
 
-	// Build the git log invocation. Use tab as a safe separator between
-	// the short sha and the subject since subjects can contain anything
-	// printable except newlines.
-	logArgs := []string{"log", "--format=%h\t%s"}
-	if len(revrange) == 0 {
-		logArgs = append(logArgs, "-n", strconv.Itoa(n))
-	} else {
-		// When a revrange is supplied, we still honor -n as an upper bound.
-		logArgs = append(logArgs, "-n", strconv.Itoa(n))
-		logArgs = append(logArgs, revrange...)
+	if listAll {
+		if len(revrange) > 0 {
+			fmt.Fprintln(os.Stderr, "git-gloss list: --all cannot be combined with a revrange")
+			return 2
+		}
+		return listAllGlossed()
 	}
+
+	return listReachable(n, glossedOnly, revrange)
+}
+
+// listReachable walks commits reachable from HEAD (or the given revrange)
+// and marks each with ● / · depending on direct-note presence.
+func listReachable(n int, glossedOnly bool, revrange []string) int {
+	logArgs := []string{"log", "--format=%h\t%s", "-n", strconv.Itoa(n)}
+	logArgs = append(logArgs, revrange...)
 
 	cmd := exec.Command("git", logArgs...)
 	stdout, err := cmd.StdoutPipe()
@@ -89,9 +104,7 @@ func cmdList(args []string) int {
 	defer w.Flush()
 
 	scanner := bufio.NewScanner(stdout)
-	// Commit subjects can be long. Bump the buffer ceiling.
 	scanner.Buffer(make([]byte, 64*1024), 1024*1024)
-
 	for scanner.Scan() {
 		line := scanner.Text()
 		tab := strings.IndexByte(line, '\t')
@@ -100,7 +113,6 @@ func cmdList(args []string) int {
 		}
 		sha := line[:tab]
 		subj := line[tab+1:]
-
 		has := hasGlossNote(sha)
 		if glossedOnly && !has {
 			continue
@@ -121,8 +133,61 @@ func cmdList(args []string) int {
 	return 0
 }
 
-// hasGlossNote reports whether the given commit has a note in refs/notes/gloss.
-// Uses `git notes show` and discards output; exit 0 = present, nonzero = absent.
+// listAllGlossed enumerates every entry in refs/notes/gloss and prints
+// the commit it's attached to, regardless of whether that commit is
+// reachable from any branch or tag.
+func listAllGlossed() int {
+	out, err := exec.Command("git", "notes", "--ref="+notesRef, "list").Output()
+	if err != nil {
+		// No notes ref yet = nothing to list.
+		return 0
+	}
+	raw := strings.TrimSpace(string(out))
+	if raw == "" {
+		return 0
+	}
+
+	type row struct {
+		sha   string
+		short string
+		subj  string
+		t     int64 // commit time; 0 for unreachable
+	}
+	var rows []row
+
+	for _, line := range strings.Split(raw, "\n") {
+		parts := strings.Fields(line)
+		if len(parts) < 2 {
+			continue
+		}
+		commitSHA := parts[1]
+		info, err := exec.Command("git", "log", "-1", "--no-walk",
+			"--format=%h\t%ct\t%s", commitSHA).Output()
+		if err != nil {
+			rows = append(rows, row{sha: commitSHA, short: shortSHA(commitSHA), subj: "(commit object missing)"})
+			continue
+		}
+		fields := strings.SplitN(strings.TrimSpace(string(info)), "\t", 3)
+		if len(fields) != 3 {
+			continue
+		}
+		ts, _ := strconv.ParseInt(fields[1], 10, 64)
+		rows = append(rows, row{sha: commitSHA, short: fields[0], subj: fields[2], t: ts})
+	}
+
+	// Newest first; unreachable commits (t=0) sink to the bottom.
+	sort.SliceStable(rows, func(i, j int) bool { return rows[i].t > rows[j].t })
+
+	w := bufio.NewWriter(os.Stdout)
+	defer w.Flush()
+	for _, r := range rows {
+		fmt.Fprintf(w, "● %s %s\n", r.short, r.subj)
+	}
+	return 0
+}
+
+// hasGlossNote reports whether the given commit has a direct note in
+// refs/notes/gloss. Does NOT use the PR-number fallback.
 func hasGlossNote(rev string) bool {
 	cmd := exec.Command("git", "notes", "--ref="+notesRef, "show", rev)
 	cmd.Stdout = nil
