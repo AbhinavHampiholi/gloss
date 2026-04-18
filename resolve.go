@@ -67,6 +67,33 @@ func noteBody(rev string) ([]byte, error) {
 	return out, nil
 }
 
+// noteExists reports whether a note is retrievable for rev.
+//
+// If allowFallback is true, follows the same PR-number resolution as
+// resolveNote, but without fetching the note body — cheaper for callers
+// that only need to decide a marker (e.g. `list`). Never errors; just
+// returns a boolean. gh lookup failures of any kind count as "no note".
+func noteExists(rev string, allowFallback bool) bool {
+	if err := exec.Command("git", "notes", "--ref="+notesRef, "show", rev).Run(); err == nil {
+		return true
+	}
+	if !allowFallback {
+		return false
+	}
+	pr, ok := prNumberFromSubject(rev)
+	if !ok {
+		return false
+	}
+	if _, err := exec.LookPath("gh"); err != nil {
+		return false
+	}
+	headSHA, err := ghHeadSHA(pr)
+	if err != nil || headSHA == "" {
+		return false
+	}
+	return exec.Command("git", "notes", "--ref="+notesRef, "show", headSHA).Run() == nil
+}
+
 // fullSHA resolves rev to a full 40-char SHA, or returns rev unchanged on failure.
 func fullSHA(rev string) string {
 	out, err := exec.Command("git", "rev-parse", rev).Output()

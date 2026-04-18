@@ -8,6 +8,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 )
 
 // cmdList prints recent commits with a marker indicating whether each
@@ -18,20 +19,23 @@ import (
 //
 // Flags:
 //
-//	-n N          limit to the N most recent commits (default 20)
-//	--glossed     only show commits that have a note
-//	--all         list every commit in the repo with a note, regardless
-//	              of reachability from HEAD. Sorted by commit time desc.
-//	<revrange>    any argument that doesn't start with '-' is passed to
-//	              git log verbatim (e.g. 'main..HEAD', 'HEAD~50..', 'branch')
+//	-n N            limit to the N most recent commits (default 20)
+//	--glossed       only show commits that have a note
+//	--all           list every commit in the repo with a note, regardless
+//	                of reachability from HEAD. Sorted by commit time desc.
+//	--no-fallback   skip the PR-number fallback when deciding markers;
+//	                faster, but squash-merged commits won't be marked ●.
+//	<revrange>      any argument that doesn't start with '-' is passed to
+//	                git log verbatim (e.g. 'main..HEAD', 'HEAD~50..').
 //
-// Note: list checks for *direct* notes only — it does not run the PR-number
-// fallback that `note` / `show` / `resume` do. To see everything that's
-// been glossed anywhere in the repo, use `--all`.
+// By default, marker resolution mirrors `note` / `show`: commits without
+// a direct note are checked via the PR-number fallback (gh). Checks run
+// in parallel across commits so walltime stays bounded.
 func cmdList(args []string) int {
 	n := 20
 	glossedOnly := false
 	listAll := false
+	noFallback := false
 	var revrange []string
 
 	for i := 0; i < len(args); i++ {
@@ -60,8 +64,10 @@ func cmdList(args []string) int {
 			glossedOnly = true
 		case a == "--all":
 			listAll = true
+		case a == "--no-fallback":
+			noFallback = true
 		case a == "-h" || a == "--help":
-			fmt.Println("Usage: git gloss list [-n N] [--glossed] [--all] [<revrange>]")
+			fmt.Println("Usage: git gloss list [-n N] [--glossed] [--all] [--no-fallback] [<revrange>]")
 			return 0
 		case strings.HasPrefix(a, "-"):
 			fmt.Fprintf(os.Stderr, "git-gloss list: unknown flag %q\n", a)
@@ -79,31 +85,33 @@ func cmdList(args []string) int {
 		return listAllGlossed()
 	}
 
-	return listReachable(n, glossedOnly, revrange)
+	return listReachable(n, glossedOnly, !noFallback, revrange)
 }
 
 // listReachable walks commits reachable from HEAD (or the given revrange)
-// and marks each with ● / · depending on direct-note presence.
-func listReachable(n int, glossedOnly bool, revrange []string) int {
+// and marks each with ● / · depending on note presence (via direct lookup
+// and — if allowFallback — the PR-number fallback). Resolution runs in
+// parallel across commits, capped at maxListConcurrency.
+const maxListConcurrency = 10
+
+func listReachable(n int, glossedOnly, allowFallback bool, revrange []string) int {
 	logArgs := []string{"log", "--format=%h\t%s", "-n", strconv.Itoa(n)}
 	logArgs = append(logArgs, revrange...)
 
-	cmd := exec.Command("git", logArgs...)
-	stdout, err := cmd.StdoutPipe()
+	out, err := exec.Command("git", logArgs...).Output()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "git-gloss list: %v\n", err)
-		return 1
-	}
-	cmd.Stderr = os.Stderr
-	if err := cmd.Start(); err != nil {
-		fmt.Fprintf(os.Stderr, "git-gloss list: %v\n", err)
-		return 1
+		return waitCode(err)
 	}
 
-	w := bufio.NewWriter(os.Stdout)
-	defer w.Flush()
+	type row struct {
+		sha    string
+		subj   string
+		marker string
+	}
 
-	scanner := bufio.NewScanner(stdout)
+	var rows []row
+	scanner := bufio.NewScanner(strings.NewReader(string(out)))
 	scanner.Buffer(make([]byte, 64*1024), 1024*1024)
 	for scanner.Scan() {
 		line := scanner.Text()
@@ -111,24 +119,34 @@ func listReachable(n int, glossedOnly bool, revrange []string) int {
 		if tab < 0 {
 			continue
 		}
-		sha := line[:tab]
-		subj := line[tab+1:]
-		has := hasGlossNote(sha)
-		if glossedOnly && !has {
+		rows = append(rows, row{sha: line[:tab], subj: line[tab+1:]})
+	}
+
+	// Resolve markers in parallel. Each worker decides ● vs · on its row.
+	sem := make(chan struct{}, maxListConcurrency)
+	var wg sync.WaitGroup
+	for i := range rows {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			sem <- struct{}{}
+			defer func() { <-sem }()
+			if noteExists(rows[i].sha, allowFallback) {
+				rows[i].marker = "●"
+			} else {
+				rows[i].marker = "·"
+			}
+		}(i)
+	}
+	wg.Wait()
+
+	w := bufio.NewWriter(os.Stdout)
+	defer w.Flush()
+	for _, r := range rows {
+		if glossedOnly && r.marker != "●" {
 			continue
 		}
-		marker := "·"
-		if has {
-			marker = "●"
-		}
-		fmt.Fprintf(w, "%s %s %s\n", marker, sha, subj)
-	}
-	if err := scanner.Err(); err != nil {
-		fmt.Fprintf(os.Stderr, "git-gloss list: %v\n", err)
-		return 1
-	}
-	if err := cmd.Wait(); err != nil {
-		return waitCode(err)
+		fmt.Fprintf(w, "%s %s %s\n", r.marker, r.sha, r.subj)
 	}
 	return 0
 }
